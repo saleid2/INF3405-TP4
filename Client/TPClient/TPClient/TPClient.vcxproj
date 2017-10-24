@@ -20,8 +20,8 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
-    <ProjectGuid>{E93D8F98-DDA9-4508-A30A-E5D397A6E000}</ProjectGuid>
-    <RootNamespace>TP4</RootNamespace>
+    <ProjectGuid>{314DF1CB-6334-455C-ADF3-0C2DF2F25326}</ProjectGuid>
+    <RootNamespace>TPClient</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.15063.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
