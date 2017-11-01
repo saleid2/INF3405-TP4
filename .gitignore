@@ -32,7 +32,8 @@
 *.app
 
 Client/TPClient/Debug/
-Client/TPClient/.vs/
+Client/TPClient/.vs/TPClient/
 Client/TPClient/TPClient/Debug/
 Serveur/TPServeur/TPServeur/Debug/
 Serveur/TPServeur/Debug/
+Serveur/TPServeur/.vs/TPServeur/
