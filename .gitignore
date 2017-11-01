@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+Client/TPClient/Debug/
+Client/TPClient/.vs/
+Client/TPClient/TPClient/Debug/
+Serveur/TPServeur/TPServeur/Debug/
+Serveur/TPServeur/Debug/
