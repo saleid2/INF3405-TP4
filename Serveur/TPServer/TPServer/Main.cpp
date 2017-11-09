@@ -49,7 +49,6 @@ struct ChildThreadParams
 };
 
 extern DWORD WINAPI EchoHandler(void* ctp);
-static std::string GeneratePasswordforUsername(const std::string& un);
 static int LoginUser(const std::string& un, const std::string& pw);
 static bool CreateUser(const std::string& un, const std::string& pw);
 
@@ -294,14 +293,6 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	ReleaseMutex(soMutex);
 
 	return 0;
-}
-
-static std::string GeneratePasswordforUsername(const std::string& un)
-{
-	std::string pw = un;
-	std::random_shuffle(pw.begin(), pw.end());
-
-	return pw;
 }
 
 static int LoginUser(const std::string& un, const std::string& pw)
