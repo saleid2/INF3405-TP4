@@ -4,6 +4,9 @@
 #include <regex>
 //#include <minwinbase.h> // TODO: Check if this include is actually necessary
 #include <sstream>		//String stream to convert int to string
+#include <thread>
+#include <forward_list>
+#include <fstream>
 
 #pragma comment(lib, "Ws2_32.lib") //Link with the Ws2_32.lib library file
 
@@ -16,6 +19,27 @@
 
 // TODO: Determine max username length to use on server & client
 #define MAX_USERNAME_LENGTH 100
+#define UN_PW_SEPARATOR "%__%"
+#define USERS_FILE "users.txt"
+#define USER_STATUS_OK 1;
+#define USER_STATUS_NOT_EXIST 0;
+#define USER_STATUS_WRONG_PW -1;
+
+// MESSAGE IDENTIFIERS
+#define MSG_TYPE_MSG "$msg:"
+#define MSG_TYPE_LOGIN ="$log:"
+#define MSG_TYPE_LOGOUT = "$quit:"
+
+// Mutex pour section critiques de modifications du vecteur contenant tous les sockets ouverts
+HANDLE soMutex;
+
+// Mutex pour la lecture et ecriture du fichier de username et pw
+HANDLE unMutex;
+
+// Mutex pour la lecture et ecriture de messages
+HANDLE mgMutex;
+
+std::forward_list<std::string> savedMessages;
 
 struct ChildThreadParams
 {
@@ -25,6 +49,9 @@ struct ChildThreadParams
 };
 
 extern DWORD WINAPI EchoHandler(void* ctp);
+static std::string GeneratePasswordforUsername(const std::string& un);
+static int LoginUser(const std::string& un, const std::string& pw);
+static bool CreateUser(const std::string& un, const std::string& pw);
 
 //Returns error message associated with last encountered WSA Error code
 wchar_t* WSAGetLastErrorMessage()
@@ -129,6 +156,7 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 
 	//Store a vector of all open sockets so that child processes can access and send messages
 	std::vector<SOCKET> openSockets;
+	std::vector<HANDLE> openThreads;
 
 	// TODO: Test connection and thread creation
 	while (true)
@@ -142,7 +170,11 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 
 		if (sd != INVALID_SOCKET)
 		{
+			WaitForSingleObject(soMutex, INFINITE);
+
 			openSockets.push_back(sd);
+
+			ReleaseMutex(soMutex);
 
 			ChildThreadParams ctp;
 			ctp.sd_ = sd;
@@ -150,7 +182,8 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 			ctp.sinRemote_ = sinRemote;
 
 			DWORD nThreadID;
-			CreateThread(nullptr, 0, EchoHandler, &ctp, 0, &nThreadID);
+
+			openThreads.push_back(CreateThread(nullptr, 0, EchoHandler, &ctp, 0, &nThreadID));
 		}
 		else
 		{
@@ -158,11 +191,27 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 		}
 	}
 
+	closesocket(sock);
+
+	for(auto thread: openThreads)
+	{
+		TerminateThread(thread, 0);
+	}
+
+	for(auto sockets: openSockets)
+	{
+		closesocket(sockets);
+	}
+
 	return 0;
 }
 
 int main()
 {
+
+	soMutex = CreateMutex(NULL, FALSE, NULL);
+	unMutex = CreateMutex(NULL, FALSE, NULL);
+
 	/* Set up winsock - This part is exactly the same for client and server */
 
 	WSADATA wsaData; //Struct that contains information about the Windows Sockets implementation
@@ -186,6 +235,11 @@ int main()
 	GetServerIPAddress(ipAddress, portNumber);
 
 	openSocket(ipAddress, portNumber, listenSocket);
+
+	WSACleanup();
+	printf("Server closed successfully");
+	
+	system("pause");
 
 	return 0;
 }
@@ -222,7 +276,97 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	}
 	while (!disconnectRequested);
 
+
 	closesocket(sd);
 
+	WaitForSingleObject(soMutex, INFINITE);
+
+	// Remove closed socket from socket vector
+	auto it = std::find(ctp->openedSockets_.begin(), ctp->openedSockets_.end(), sd);
+	if(it != ctp->openedSockets_.end())
+	{
+		std::swap(*it, ctp->openedSockets_.back()); // Swap item with last one
+		ctp->openedSockets_.pop_back(); // Remove last item from vector
+
+		// Using swap + pop_back avoids the reshuffling that erase does
+	}
+
+	ReleaseMutex(soMutex);
+
 	return 0;
+}
+
+static std::string GeneratePasswordforUsername(const std::string& un)
+{
+	std::string pw = un;
+	std::random_shuffle(pw.begin(), pw.end());
+
+	return pw;
+}
+
+static int LoginUser(const std::string& un, const std::string& pw)
+{
+	std::ifstream in;
+	std::string strBuffer;
+	int status = USER_STATUS_NOT_EXIST;
+
+	WaitForSingleObject(unMutex, INFINITE);
+
+	in.open(USERS_FILE);
+	if (!in)
+	{
+		//Error occured!
+		printf("Cannot open %s", USERS_FILE);
+	}
+	else
+	{
+		// Loop until end of file
+		while (in >> strBuffer)
+		{
+			// Extract username from line
+			std::string strUser = strBuffer.substr(0, strBuffer.find(UN_PW_SEPARATOR));
+			strBuffer.erase(0, strBuffer.find(UN_PW_SEPARATOR) + ((std::string)UN_PW_SEPARATOR).length());
+
+			if (strUser == un)
+			{
+				// Extract password from line
+				std::string strPW = strBuffer;
+
+				if(strPW == pw)
+				{
+					status = USER_STATUS_OK;
+				}
+				else
+				{
+					status = USER_STATUS_WRONG_PW;
+				}
+				// We can stop looping since we found the user
+				break;
+			}
+		}
+	}
+
+	if (in.is_open()) in.close();
+
+	ReleaseMutex(unMutex);
+
+	return status;
+}
+
+static bool CreateUser(const std::string& un, const std::string& pw)
+{
+	std::ofstream out;
+	WaitForSingleObject(unMutex, INFINITE);
+	if (!out)
+	{
+		//Error occured!
+		printf("Cannot open %s", USERS_FILE);
+	}
+	else
+	{
+		out.open(USERS_FILE, std::ios::app);
+		out << un + UN_PW_SEPARATOR + pw << std::endl;
+		out.close();
+	}
+	ReleaseMutex(unMutex);
 }
