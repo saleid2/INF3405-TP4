@@ -10,7 +10,10 @@
 #include <thread>		
 
 /*
-TO DO : PICK AND IMPLEMENT LOG OUT PROCEDURE (empty message as suggested in email?
+TO DO : PICK AND IMPLEMENT LOG OUT PROCEDURE (empty message as suggested in email?)
+TO DO : MANAGE 200 CHAR MAX
+TO DO : SEPARATE NAME AND TEXT FROM INCOMING MESSAGES
+TO DO : WHAT HAPPENS TO SENT MESSAGES (APPEAR DOUBLE... MAY HAVE TO MASK CLIENT'S OWN FROM BROADCASTS)
 */
 
 using namespace std;
@@ -18,10 +21,9 @@ using namespace std;
 #pragma comment(lib, "Ws2_32.lib") //Link with the Ws2_32.lib library file
 
 /* Global const */
-#define IPV4_LENGTH 16
-#define PORT_MAX_LENGTH 5
-
-#define MESSAGE_MAX_LENGTH 200
+#define MIN_PORT 5000
+#define MAX_PORT 5050
+#define MESSAGE_MAX_LENGTH 200	//INUTILE
 #define MAX_MSG_BUF_LENGTH 300	//TO DO : Validate with Salim and calculate real max
 #define MAX_USERNAME_LENGTH 10	//TO DO : Validate with Salim
 #define MAX_PASSWORD_LENGTH 8	//TO DO : Validate with Salim
@@ -53,7 +55,10 @@ bool validateIP(string &ip);
 bool validatePort(string &port);
 int submitLoginRequest(Client &client);
 int processIncomingMessage(Client &client);
+bool verifyTooLong(string &message);
+bool verifyDisconnectResquest(string &message);
 void printMessage(Client &client);
+int closeProgramRoutine(Client &client);
 
 int main() {
 
@@ -92,10 +97,7 @@ int main() {
 	iResult = getaddrinfo((PCSTR)&client.ipAddress, (PCSTR)&client.port, &hints, &result);	//TODO if connection issues, perhaps casts don't work
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
-		WSACleanup();
-		printf("Press any key to end the program\n");
-		_getch();
-		return 1;
+		return (closeProgramRoutine(client));
 	}
 
 	//Find first valid address
@@ -104,18 +106,14 @@ int main() {
 	
 	//If address not found
 	if (((result->ai_family != AF_INET || (result == NULL)))) {
-		freeaddrinfo(result);
-		WSACleanup();
 		printf("Cannot find address \n");
-		printf("Press any key to end the program\n");
-		_getch();
-		return 1;
+		return (closeProgramRoutine(client));
 	}
 
 	sockaddr_in *address;
 	address = (struct sockaddr_in *) result->ai_addr;
 
-	printf("Connecting to port %s of server %s\n", client.port, inet_ntoa(address->sin_addr));
+	printf("Connecting to port %s of server %s\n", client.port.c_str(), inet_ntoa(address->sin_addr));
 
 	ptr = result;
 
@@ -124,39 +122,24 @@ int main() {
 
 	if (client.socket == INVALID_SOCKET) {
 		printf("Error at socket(): %ld\n", WSAGetLastError());
-		freeaddrinfo(result);
-		WSACleanup();
-		printf("Press any key to end the program\n");
-		_getch();
-		return 1;
+		return (closeProgramRoutine(client));
 	}
 
 	//Connecting to server
 	iResult = connect(client.socket, ptr->ai_addr, (int)ptr->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
-		closesocket(client.socket);
-		client.socket = INVALID_SOCKET;
-		printf("Cannot connect to port %s of server %s\n", client.port, inet_ntoa(address->sin_addr));
-		freeaddrinfo(result);	// TODO : Should this be done once out of if?
-		WSACleanup();
-		printf("Appuyez une touche pour finir\n");
-		getchar();
-		return 1;
+		printf("Cannot connect to port %s of server %s\n", client.port.c_str(), inet_ntoa(address->sin_addr));
+		return (closeProgramRoutine(client));
 	}
 
 	cout << "Successful connection so server" << endl;
 
 	if (!submitLoginRequest(client)) {
-		closesocket(client.socket);
-		client.socket = INVALID_SOCKET;
-		printf("Login failed\n", client.port, inet_ntoa(address->sin_addr));
-		freeaddrinfo(result);
-		WSACleanup();
-		printf("Appuyez une touche pour finir\n");
-		getchar();
-		return 1;
+		printf("Login failed\n");
+		return (closeProgramRoutine(client));
 	}
 
+	freeaddrinfo(result);	//??
 	//thread listening to server
 	thread my_thread(processIncomingMessage, client);
 	string messageToServer = "";
@@ -164,13 +147,17 @@ int main() {
 	while (1)
 	{
 		getline(cin, messageToServer);
-		iResult = send(client.socket, messageToServer.c_str(), strlen(messageToServer.c_str()), 0);
+		if (!verifyTooLong(messageToServer)) {
+			iResult = send(client.socket, messageToServer.c_str(), strlen(messageToServer.c_str()), 0);
 
-		if (iResult <= 0)
-		{
-			cout << "send() failed: " << WSAGetLastError() << endl;
-			break;
+			if (iResult <= 0)
+			{
+				cout << "send() failed: " << WSAGetLastError() << endl;
+				break;
+			}
 		}
+		else if (verifyDisconnectResquest(messageToServer))
+			break;
 	}
 
 	//Shutdown the connection since no more data will be sent
@@ -189,7 +176,7 @@ void requestPortAndIP(Client& client) {
 	} while (!validateIP(client.ipAddress));
 	
 	do {
-		cout << "Please pick a port number between 5000 and 5050: ";
+		cout << "Please pick a port number between " << MIN_PORT << " and " << MAX_PORT << ": ";
 		cin >> client.port;
 	} while (!validatePort(client.port));
 }
@@ -232,7 +219,7 @@ bool validateIP(string& ip) {
 	bool isValidIp = regex_search(ip, ipRegex);
 
 	if (!isValidIp) {
-		cout << "The IP address is not valid. Please enter a valid IP adress." << endl;
+		cout << "The IP address is not valid. Please enter a valid IP address." << endl;
 	}
 
 	return (isValidIp);
@@ -245,7 +232,7 @@ bool validatePort(string& port) {
 	bool isValidPort = regex_search(port, ipRegex);
 
 	if (!isValidPort) {
-		cout << "The port number is not valid. Please enter a valid port number between 5000 and 5050." << endl;
+		cout << "The port number is not valid. Please enter a valid port number between " << MIN_PORT << " and " << MAX_PORT << "."<< endl;
 	}
 
 	return (isValidPort);
@@ -275,9 +262,25 @@ void printMessage(Client& client) {
 		cout << "MESSAGE DATA : " << receivedMessage << endl;
 	}
 	else
-		cout << "UNKNWON MESSAGE HEADER" << endl;
+		cout << "ERROR : Unknown message header from server" << endl;
 };
 
+bool verifyTooLong(string &message) {
+	if (message.length() > MESSAGE_MAX_LENGTH) {
+		cout << "CHATROOM WARNING: Your message had " << message.length() << "and thus was not sent" <<endl;
+		cout << "CHATROOM REMINDER: Max message length is " << MESSAGE_MAX_LENGTH << " and blank messages will disconnect from chat." << endl;
+		return true;
+	}
+	return false;
+}
+
+bool verifyDisconnectResquest(string &message) {
+	if (message.length() == 0) {
+		cout << "CHATROOM REMINDER: You have entered a blank message. Press any key to close program." << endl;
+		return true;
+	}
+	return false;
+}
 
 int processIncomingMessage(Client& client)
 {
@@ -303,5 +306,10 @@ int processIncomingMessage(Client& client)
 	return 0;
 }
 
-
-
+int closeProgramRoutine(Client &client) {
+	closesocket(client.socket);
+	WSACleanup();
+	printf("Press any key to end the program\n");
+	getchar();
+	return 1;
+}
