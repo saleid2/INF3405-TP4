@@ -26,6 +26,16 @@ using namespace std;
 #define MAX_USERNAME_LENGTH 10	//TO DO : Validate with Salim
 #define MAX_PASSWORD_LENGTH 8	//TO DO : Validate with Salim
 
+struct Client
+{
+	SOCKET socket;
+	char receivedMessage[MAX_MSG_BUF_LENGTH];
+	string ipAddress;
+	string port;
+	string username;
+	string password;
+};
+
 //Headers and separator
 const string MSG_TYPE_MSG = "$msg:";
 const string MSG_TYPE_LOG = "$log:";
@@ -44,16 +54,6 @@ bool validatePort(string &port);
 int submitLoginRequest(Client &client);
 int processIncomingMessage(Client &client);
 void printMessage(Client &client);
-
-struct Client
-{
-	SOCKET socket;
-	char receivedMessage[MAX_MSG_BUF_LENGTH];
-	string ipAddress;
-	string port;
-	string username;
-	string password;
-};
 
 int main() {
 
