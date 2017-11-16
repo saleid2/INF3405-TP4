@@ -5,8 +5,9 @@
 //#include <minwinbase.h> // TODO: Check if this include is actually necessary
 #include <sstream>		//String stream to convert int to string
 #include <thread>
-#include <forward_list>
 #include <fstream>
+#include <list>
+#include <ws2tcpip.h>
 
 #pragma comment(lib, "Ws2_32.lib") //Link with the Ws2_32.lib library file
 
@@ -15,20 +16,21 @@
 #define IP_ADDR_MAX_LENGTH 16
 #define PORT_LENGTH 4
 #define MAX_MSG_LENGTH 200
+#define MAX_HEADER_LENGTH 6
 #define MAX_STORED_MSG 15
 
-// TODO: Determine max username length to use on server & client
-#define MAX_USERNAME_LENGTH 100
 #define UN_PW_SEPARATOR "%__%"
 #define USERS_FILE "users.txt"
-#define USER_STATUS_OK 1;
-#define USER_STATUS_NOT_EXIST 0;
-#define USER_STATUS_WRONG_PW -1;
+#define USER_STATUS_OK 1
+#define USER_STATUS_NOT_EXIST 0
+#define USER_STATUS_WRONG_PW -1
 
 // MESSAGE IDENTIFIERS
 #define MSG_TYPE_MSG "$msg:"
-#define MSG_TYPE_LOGIN ="$log:"
-#define MSG_TYPE_LOGOUT = "$quit:"
+#define MSG_TYPE_LOGIN "$log:"
+#define MSG_TYPE_LOGOUT "$quit:"
+#define LOGIN_STATUS_OK "$login_ok:"
+#define LOGIN_STATUS_FAIL "$login_failed:"
 
 // Mutex pour section critiques de modifications du vecteur contenant tous les sockets ouverts
 HANDLE soMutex;
@@ -39,7 +41,7 @@ HANDLE unMutex;
 // Mutex pour la lecture et ecriture de messages
 HANDLE mgMutex;
 
-std::forward_list<std::string> savedMessages;
+std::list<std::string> savedMessages;
 
 struct ChildThreadParams
 {
@@ -49,6 +51,7 @@ struct ChildThreadParams
 };
 
 extern DWORD WINAPI EchoHandler(void* ctp);
+static void SendMessageHistory(SOCKET sd);
 static int LoginUser(const std::string& un, const std::string& pw);
 static bool CreateUser(const std::string& un, const std::string& pw);
 
@@ -250,23 +253,71 @@ DWORD WINAPI EchoHandler(void* ctp_)
 
 	bool disconnectRequested = false;
 
-	char readBuffer[MAX_MSG_LENGTH], username[MAX_USERNAME_LENGTH];
+	char readBuffer[MAX_MSG_LENGTH + MAX_HEADER_LENGTH];
+	std::string username = "";
 	int readBytes;
 
-	//User's IP: inet_ntoa(ctp->sinRemote_.sin_addr);
-	//User's Port: ntohs(ctp->sinRemote_.sin_port);
+	
+	char userip[INET_ADDRSTRLEN];
+	u_short userport;
+
+	InetNtop(AF_INET, &(ctp->sinRemote_.sin_addr), userip, INET_ADDRSTRLEN);
+	userport = ntohs(ctp->sinRemote_.sin_port);
 
 	//Read Data from client
 	do
 	{
 		readBytes = 0;
-		readBytes = recv(sd, readBuffer, MAX_MSG_LENGTH, 0);
+		readBytes = recv(sd, readBuffer, MAX_MSG_LENGTH + MAX_HEADER_LENGTH, 0);
 
-		if (readBytes > 0)
+		if (readBytes > 0 && readBytes != SOCKET_ERROR)
 		{
-			// TODO: Check if message is for login
-			// TODO: Check if message is for disconnect
-			// TODO: Save and broadcast received message
+			std::string msgData = readBuffer;
+			std::string msgType = msgData.substr(0, msgData.find(':') + 1);
+			
+			msgData.erase(0, msgData.find(msgType) + msgType.length());
+
+			if(msgType == MSG_TYPE_LOGIN)
+			{
+				
+				std::string tempUN = msgData.substr(0, msgData.find(UN_PW_SEPARATOR));
+				std::string tempPW = msgData.erase(0, msgData.find(UN_PW_SEPARATOR) + ((std::string)UN_PW_SEPARATOR).length());
+				
+				int loginStatus = LoginUser(tempUN, tempPW);
+				if(loginStatus == USER_STATUS_OK)
+				{
+					username = tempUN;
+					send(sd, (char*)LOGIN_STATUS_OK, sizeof((char*)LOGIN_STATUS_OK), 0);
+					SendMessageHistory(sd);
+				}
+				else if(loginStatus == USER_STATUS_WRONG_PW)
+				{
+					send(sd, (char*)LOGIN_STATUS_FAIL, sizeof((char*)LOGIN_STATUS_FAIL), 0);
+				}
+				else if(loginStatus == USER_STATUS_NOT_EXIST)
+				{
+					bool userCreated = CreateUser(tempUN, tempPW);
+					if (userCreated)
+					{
+						username = tempUN;
+						send(sd, (char*)LOGIN_STATUS_OK, sizeof((char*)LOGIN_STATUS_OK), 0);
+						SendMessageHistory(sd);
+					}
+					else
+					{
+						send(sd, (char*)LOGIN_STATUS_FAIL, sizeof((char*)LOGIN_STATUS_FAIL), 0);
+					}
+				}
+			}
+			else if (msgType == MSG_TYPE_MSG)
+			{
+				// TODO: Process message
+				// TODO: Format message using username, userip, userport and time
+			}
+			else if (msgType == MSG_TYPE_LOGOUT)
+			{
+				disconnectRequested = true;
+			}
 		}
 		else
 		{
@@ -293,6 +344,19 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	ReleaseMutex(soMutex);
 
 	return 0;
+}
+
+static void SendMessageHistory(SOCKET sd)
+{
+	WaitForSingleObject(mgMutex, INFINITE);
+	auto it = savedMessages.begin();
+	auto end = savedMessages.end();
+	for (it; it != end; ++it)
+	{
+		std::string msg = *it;
+		send(sd, msg.c_str(), sizeof msg.c_str(), 0);
+	}
+	ReleaseMutex(mgMutex);
 }
 
 static int LoginUser(const std::string& un, const std::string& pw)
@@ -347,6 +411,7 @@ static int LoginUser(const std::string& un, const std::string& pw)
 static bool CreateUser(const std::string& un, const std::string& pw)
 {
 	std::ofstream out;
+	bool success = false;
 	WaitForSingleObject(unMutex, INFINITE);
 	if (!out)
 	{
@@ -358,6 +423,9 @@ static bool CreateUser(const std::string& un, const std::string& pw)
 		out.open(USERS_FILE, std::ios::app);
 		out << un + UN_PW_SEPARATOR + pw << std::endl;
 		out.close();
+		success = true;
 	}
 	ReleaseMutex(unMutex);
+
+	return success;
 }
