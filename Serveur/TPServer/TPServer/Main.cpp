@@ -18,19 +18,17 @@
 #define MAX_MSG_LENGTH 200
 #define MAX_HEADER_LENGTH 6
 #define MAX_STORED_MSG 15
-
 #define UN_PW_SEPARATOR "%__%"
 #define USERS_FILE "users.txt"
 #define USER_STATUS_OK 1
 #define USER_STATUS_NOT_EXIST 0
 #define USER_STATUS_WRONG_PW -1
-
-// MESSAGE IDENTIFIERS
 #define MSG_TYPE_MSG "$msg:"
 #define MSG_TYPE_LOGIN "$log:"
 #define MSG_TYPE_LOGOUT "$quit:"
 #define LOGIN_STATUS_OK "$login_ok:"
 #define LOGIN_STATUS_FAIL "$login_failed:"
+#define LOG_MSG_FILE "log.txt"
 
 // Mutex pour section critiques de modifications du vecteur contenant tous les sockets ouverts
 HANDLE soMutex;
@@ -50,7 +48,10 @@ struct ChildThreadParams
 	sockaddr_in sinRemote_;
 };
 
+DWORD WINAPI SaveHistoryLoop(void* v);
 extern DWORD WINAPI EchoHandler(void* ctp);
+static bool SaveHistory();
+static void LoadHistory();
 static void SendMessageHistory(SOCKET sd);
 static std::string FormatMessageBeforeSend(const std::string& un, const std::string& ip, const std::string& msg);
 static int LoginUser(const std::string& un, const std::string& pw);
@@ -161,6 +162,9 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 	std::vector<SOCKET> openSockets;
 	std::vector<HANDLE> openThreads;
 
+	DWORD saveThreadID;
+	HANDLE saveThread = CreateThread(nullptr, 0, SaveHistoryLoop, NULL, 0, &saveThreadID);
+
 	// TODO: Test connection and thread creation
 	while (true)
 	{
@@ -195,6 +199,9 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 	}
 
 	closesocket(sock);
+
+	TerminateThread(saveThread, 0);
+	SaveHistory();
 
 	for(auto thread: openThreads)
 	{
@@ -237,6 +244,8 @@ int main()
 
 	GetServerIPAddress(ipAddress, portNumber);
 
+	LoadHistory();
+
 	openSocket(ipAddress, portNumber, listenSocket);
 
 	WSACleanup();
@@ -245,6 +254,80 @@ int main()
 	system("pause");
 
 	return 0;
+}
+
+DWORD WINAPI SaveHistoryLoop(void* v)
+{
+	while(1)
+	{
+		bool saved = false;
+		Sleep(1000); // Persist messages to disk every minute
+		saved = SaveHistory();
+		if(!saved)
+		{
+			// Try again
+			saved = SaveHistory();
+			if(!saved)
+			{
+				printf("Couldn't persist chat log to disk");
+			}
+			else
+			{
+				printf("Chat log saved to disk");
+			}
+		}
+	}
+
+	return 0;
+}
+
+static bool SaveHistory()
+{
+	bool success = true;
+
+	WaitForSingleObject(mgMutex, INFINITE);
+
+	std::ofstream out;
+	out.open(LOG_MSG_FILE); // Open in overwrite mode
+
+	if(out)
+	{
+		auto it = savedMessages.begin();
+		auto end = savedMessages.end();
+
+		for (it; it != end; ++it)
+		{
+			out << *it << std::endl;
+		}
+
+		out.close();
+	}
+	else
+	{
+		success = false;
+	}
+
+	ReleaseMutex(mgMutex);
+	return success;
+}
+
+static void LoadHistory()
+{
+	WaitForSingleObject(mgMutex, INFINITE);
+
+	std::ifstream in;
+	in.open(LOG_MSG_FILE);
+	if(in)
+	{
+		savedMessages.clear();
+		std::string msg;
+		while(std::getline(in, msg))
+		{
+			savedMessages.push_back(msg);
+		}
+	}
+
+	ReleaseMutex(mgMutex);
 }
 
 DWORD WINAPI EchoHandler(void* ctp_)
@@ -371,18 +454,18 @@ DWORD WINAPI EchoHandler(void* ctp_)
 static std::string FormatMessageBeforeSend(const std::string& un, const std::string& ip, const std::string& msg)
 {
 	time_t rawTime;
-	struct tm* timeInfo;
+	struct tm timeInfo;
 	time(&rawTime);
-	timeInfo = localtime(&rawTime);
+	localtime_s(&timeInfo, &rawTime);
 
 	std::stringstream timeSS;
 
-	timeSS << std::to_string(timeInfo->tm_year + 1900) + "-";
-	timeSS << std::to_string(timeInfo->tm_mon + 1) + "-";
-	timeSS << std::to_string(timeInfo->tm_mday) + "@";
-	timeSS << std::to_string(timeInfo->tm_hour) + ":";
-	timeSS << std::to_string(timeInfo->tm_min) + ":";
-	timeSS << std::to_string(timeInfo->tm_sec);
+	timeSS << std::to_string(timeInfo.tm_year + 1900) + "-";
+	timeSS << std::to_string(timeInfo.tm_mon + 1) + "-";
+	timeSS << std::to_string(timeInfo.tm_mday) + "@";
+	timeSS << std::to_string(timeInfo.tm_hour) + ":";
+	timeSS << std::to_string(timeInfo.tm_min) + ":";
+	timeSS << std::to_string(timeInfo.tm_sec);
 
 	std::stringstream ss;
 	ss << "[" + un + " - " + ip + " - " + timeSS.str() + "]: ";
@@ -456,6 +539,7 @@ static int LoginUser(const std::string& un, const std::string& pw)
 static bool CreateUser(const std::string& un, const std::string& pw)
 {
 	std::ofstream out;
+	out.open(USERS_FILE, std::ios::app);
 	bool success = false;
 	WaitForSingleObject(unMutex, INFINITE);
 	if (!out)
@@ -465,7 +549,6 @@ static bool CreateUser(const std::string& un, const std::string& pw)
 	}
 	else
 	{
-		out.open(USERS_FILE, std::ios::app);
 		out << un + UN_PW_SEPARATOR + pw << std::endl;
 		out.close();
 		success = true;
