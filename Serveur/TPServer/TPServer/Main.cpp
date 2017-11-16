@@ -52,6 +52,7 @@ struct ChildThreadParams
 
 extern DWORD WINAPI EchoHandler(void* ctp);
 static void SendMessageHistory(SOCKET sd);
+static std::string FormatMessageBeforeSend(const std::string& un, const std::string& ip, const std::string& msg);
 static int LoginUser(const std::string& un, const std::string& pw);
 static bool CreateUser(const std::string& un, const std::string& pw);
 
@@ -258,11 +259,15 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	int readBytes;
 
 	
-	char userip[INET_ADDRSTRLEN];
-	u_short userport;
+	char ipAddr[INET_ADDRSTRLEN];
+	u_short userPort;
+	std::string userIP;
 
-	InetNtop(AF_INET, &(ctp->sinRemote_.sin_addr), userip, INET_ADDRSTRLEN);
-	userport = ntohs(ctp->sinRemote_.sin_port);
+	InetNtop(AF_INET, &(ctp->sinRemote_.sin_addr), ipAddr, INET_ADDRSTRLEN);
+	userPort = ntohs(ctp->sinRemote_.sin_port);
+
+	userIP = ipAddr;
+	userIP += ":" + userPort;
 
 	//Read Data from client
 	do
@@ -311,8 +316,25 @@ DWORD WINAPI EchoHandler(void* ctp_)
 			}
 			else if (msgType == MSG_TYPE_MSG)
 			{
-				// TODO: Process message
-				// TODO: Format message using username, userip, userport and time
+				std::string formattedMsg = FormatMessageBeforeSend(username, userIP, msgData);
+
+				WaitForSingleObject(mgMutex, INFINITE);
+
+				savedMessages.pop_front();
+				savedMessages.push_back(formattedMsg);
+
+				WaitForSingleObject(soMutex, INFINITE);
+
+				auto it = ctp->openedSockets_.begin();
+				auto end = ctp->openedSockets_.end();
+				for(it; it != end; ++it)
+				{
+					send(*it, formattedMsg.c_str(), sizeof formattedMsg.c_str(), 0);
+				}
+
+				ReleaseMutex(soMutex);
+
+				ReleaseMutex(mgMutex);
 			}
 			else if (msgType == MSG_TYPE_LOGOUT)
 			{
@@ -344,6 +366,29 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	ReleaseMutex(soMutex);
 
 	return 0;
+}
+
+static std::string FormatMessageBeforeSend(const std::string& un, const std::string& ip, const std::string& msg)
+{
+	time_t rawTime;
+	struct tm* timeInfo;
+	time(&rawTime);
+	timeInfo = localtime(&rawTime);
+
+	std::stringstream timeSS;
+
+	timeSS << std::to_string(timeInfo->tm_year + 1900) + "-";
+	timeSS << std::to_string(timeInfo->tm_mon + 1) + "-";
+	timeSS << std::to_string(timeInfo->tm_mday) + "@";
+	timeSS << std::to_string(timeInfo->tm_hour) + ":";
+	timeSS << std::to_string(timeInfo->tm_min) + ":";
+	timeSS << std::to_string(timeInfo->tm_sec);
+
+	std::stringstream ss;
+	ss << "[" + un + " - " + ip + " - " + timeSS.str() + "]: ";
+	ss << msg;
+
+	return ss.str();
 }
 
 static void SendMessageHistory(SOCKET sd)
