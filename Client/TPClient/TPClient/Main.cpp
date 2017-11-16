@@ -96,7 +96,7 @@ int main() {
 	// Resolve the server address and port
 	iResult = getaddrinfo((PCSTR)&client.ipAddress, (PCSTR)&client.port, &hints, &result);	//TODO if connection issues, perhaps casts don't work
 	if (iResult != 0) {
-		printf("getaddrinfo failed: %d\n", iResult);
+		printf("getaddrinfo() failed: %d\n", iResult);
 		return (closeProgramRoutine(client));
 	}
 
@@ -310,6 +310,6 @@ int closeProgramRoutine(Client &client) {
 	closesocket(client.socket);
 	WSACleanup();
 	printf("Press any key to end the program\n");
-	getchar();
+	_getch();
 	return 1;
 }
