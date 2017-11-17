@@ -218,9 +218,9 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 
 int main()
 {
-
 	soMutex = CreateMutex(NULL, FALSE, NULL);
 	unMutex = CreateMutex(NULL, FALSE, NULL);
+	mgMutex = CreateMutex(NULL, FALSE, NULL);
 
 	/* Set up winsock - This part is exactly the same for client and server */
 
@@ -269,11 +269,11 @@ DWORD WINAPI SaveHistoryLoop(void* v)
 			saved = SaveHistory();
 			if(!saved)
 			{
-				printf("Couldn't persist chat log to disk");
+				printf("Couldn't persist chat log to disk\n");
 			}
 			else
 			{
-				printf("Chat log saved to disk");
+				printf("Chat log saved to disk\n");
 			}
 		}
 	}
@@ -325,6 +325,7 @@ static void LoadHistory()
 		{
 			savedMessages.push_back(msg);
 		}
+		in.close();
 	}
 
 	ReleaseMutex(mgMutex);
@@ -358,9 +359,10 @@ DWORD WINAPI EchoHandler(void* ctp_)
 		readBytes = 0;
 		readBytes = recv(sd, readBuffer, MAX_MSG_LENGTH + MAX_HEADER_LENGTH, 0);
 
-		if (readBytes > 0 && readBytes != SOCKET_ERROR)
+		if (readBytes != SOCKET_ERROR)
 		{
 			std::string msgData = readBuffer;
+			msgData = msgData.substr(0, readBytes);
 			std::string msgType = msgData.substr(0, msgData.find(':') + 1);
 			
 			msgData.erase(0, msgData.find(msgType) + msgType.length());
