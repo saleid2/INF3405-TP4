@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <string>
+#include <regex>
 
 
 using namespace std;
@@ -15,8 +16,9 @@ using namespace std;
 
 /* Function prototyping */
 
-void requestPortAndIP(char* &ipAddress, char* &port);
-bool validateIP(string ip);
+void requestPortAndIP(string* ipAddress, string* &port);
+bool validateIP(string* ip);
+bool validatePort(string* port);
 
 
 int main() {
@@ -44,40 +46,105 @@ int main() {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	char* ipAddress = new char[IPV4_LENGTH];
-	char* port = new char[PORT_MAX_LENGTH];
+	string* ipAddress = new string;
+	string* port = new string;
 
 	requestPortAndIP(ipAddress, port);
 
 	// Resolve the server address and port
+	/*
 	iResult = getaddrinfo(ipAddress, port, &hints, &result);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
 		WSACleanup();
 		return 1;
 	}
-
+	*/
 	// TO CONTINUE
+
+	delete ipAddress;
+	delete port;
 
 	return 0;
 }
 
-void requestPortAndIP(char* &ipAddress, char* &port) {
+void requestPortAndIP(string* ipAddress, string* &port) {
 
 	cout << "Launching chatroom" << endl;
 
-	char tempIP[IPV4_LENGTH];
+	//char tempIP[IPV4_LENGTH];
 
 	do {
 		cout << "Please enter the server IP address: ";
-		gets_s(tempIP);
-	} while (!validateIP(tempIP));
+		cin >> *ipAddress;
+	} while (!validateIP(ipAddress));
 	
+	do {
+		cout << "Please pick a port number between 10000 and 10050: ";
+		cin >> *port;
+	} while (!validatePort(port));
+
+	cout << "Port ok";
+
+	while (1);
+
 	// TO CONTINUE
+	/*
+	void saisirParametres(char*& adresseIP, char*& port) {
+
+		cout << "Parametres du serveur a joindre" << endl;
+
+		char adresseIPTemp[LONGUEUR_ADRESSE_IP];
+		//demander l'adresse IP tant qu'elle n'est pas valide
+		do {
+			cout << endl << "Entrer l'adresse IP du poste du serveur a joindre: ";
+			gets_s(adresseIPTemp);
+		} while (!estFormatIP(adresseIPTemp));
+
+		//enregistrer l'adresse IP validée
+		for (size_t i = 0; i < sizeof(adresseIPTemp); i++) {
+			adresseIP[i] = adresseIPTemp[i];
+		}
+
+		char portTemp[LONGUEUR_PORT];
+		//demander le port tant qu'il n'est pas valide
+		do {
+			cout << endl << "Entrer le port d'ecoute (entre 6000 et 6050): ";
+			gets_s(portTemp);
+		} while (!estPortValide(portTemp));
+
+		//enregistrer le port validé
+		for (size_t i = 0; i < sizeof(portTemp); i++) {
+			port[i] = portTemp[i];
+		}
+
+	}
+	*/
 
 }
 
-bool validateIP(string ip) {
-	//TO DO
-	return false;
+bool validateIP(string* ip) {
+
+	regex ipRegex("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$");
+
+	bool isValidIp = regex_search(*ip, ipRegex);
+
+	if (!isValidIp) {
+		cout << "The IP address is not valid. Please enter a valid IP adress." << endl;
+	}
+
+	return (isValidIp);
+}
+
+bool validatePort(string* port) {
+
+	regex ipRegex("^100([0-4][0-9]|50)$");
+
+	bool isValidIp = regex_search(*port, ipRegex);
+
+	if (!isValidIp) {
+		cout << "The port number is not valid. Please enter a valid port number between 10000 and 100050." << endl;
+	}
+
+	return (regex_search(*port, ipRegex));
 }
