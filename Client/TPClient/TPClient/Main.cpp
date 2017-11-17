@@ -47,6 +47,7 @@ struct Client
 const string MSG_TYPE_MSG = "$msg:";
 const string MSG_TYPE_LOG = "$log:";
 const string MSG_TYPE_LOGIN_OK = "$login_ok:";
+const string MSG_TYPE_LISTEN = "$ok:";
 const string MSG_TYPE_LOGIN_FAILED = "$login_failed:";
 const string MSG_TYPE_LOGOUT = "$quit:";
 const string DATA_SEPARATOR = "%__%";
@@ -93,7 +94,6 @@ int main() {
 	hints.ai_protocol = IPPROTO_TCP;
 
 	requestPortAndIP(client);
-	requestLoginInfo(client);
 
 	string ip = client.ipAddress;
 
@@ -148,16 +148,14 @@ int main() {
 
 	cout << "Successful connection so server" << endl;
 
-	if (!submitLoginRequest(client)) {	//Vérifier que 
-		printf("Login failed\n");
-		return (closeProgramRoutine(client));
-	}
+	do {
+		requestLoginInfo(client);
+	} while (!submitLoginRequest(client));
 
 	freeaddrinfo(result);	//??**************should be fine*****
 	//thread listening to server
 	threadRunning = true;
 	thread listeningThread(processIncomingMessage, client);
-
 	cin.ignore();
 	while (1)
 	{
@@ -261,21 +259,18 @@ int submitLoginRequest(Client &client) {
 	
 	int iResult;
 	string loginInfo = MSG_TYPE_LOG + client.username + DATA_SEPARATOR + client.password;
-	cout << "SENT BEFORE" << loginInfo << endl;
-	cout << "RECEIVED BEFORE" << client.receivedMessage << endl;
 	//Send login info
 	iResult = send(client.socket, loginInfo.c_str(), strlen(loginInfo.c_str()), 0);
 	//Analyse login response
 	recv(client.socket, client.receivedMessage, MAX_MSG_BUF_LENGTH, 0);
 	string messageFromServer = client.receivedMessage;
 
-	cout << "RECEIVED AFTER" << client.receivedMessage << endl;
-
-	if (messageFromServer == MSG_TYPE_LOGIN_FAILED)
-		requestLoginInfo(client);
+	if (messageFromServer == MSG_TYPE_LOGIN_FAILED) {
+		cout << "Invalid password" << endl;
+		return 0;
+	}
 	else if (messageFromServer == MSG_TYPE_LOGIN_OK)
 		return 1;
-	return 0;
 }
 
 void printMessage(string &message) {
@@ -302,6 +297,7 @@ bool verifyDisconnectResquest(string &message) {
 int processIncomingMessage(Client& client)
 {
 	string messageToPrint;
+	send(client.socket, MSG_TYPE_LISTEN.c_str(), strlen(MSG_TYPE_LISTEN.c_str()), 0); //handshake
 	while (threadRunning)
 	{
 		memset(client.receivedMessage, 0, MAX_MSG_BUF_LENGTH);
