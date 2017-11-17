@@ -25,8 +25,13 @@ using namespace std;
 #define MAX_PORT 5050
 #define MESSAGE_MAX_LENGTH 200	//INUTILE
 #define MAX_MSG_BUF_LENGTH 300	//TO DO : Validate with Salim and calculate real max
-#define MAX_USERNAME_LENGTH 10	//TO DO : Validate with Salim
-#define MAX_PASSWORD_LENGTH 8	//TO DO : Validate with Salim
+#define MAX_USERNAME_LENGTH 100	//TO DO : Validate with Salim
+#define MAX_PASSWORD_LENGTH 100	//TO DO : Validate with Salim
+#define MAX_STORED_MESSAGES 15	//TO DO : Validate with Salim
+
+//TEST**********
+#define IP_ADDRESS "128.0.0.1"
+#define DEFAULT_PORT "5000"
 
 struct Client
 {
@@ -46,6 +51,9 @@ const string MSG_TYPE_LOGIN_FAILED = "$login_failed:";
 const string MSG_TYPE_LOGOUT = "$quit:";
 const string DATA_SEPARATOR = "%__%";
 
+//Global var
+bool threadRunning = false;
+
 /* Function prototyping */
 void requestPortAndIP(Client &client);
 void requestLoginInfo(Client &client);
@@ -57,18 +65,21 @@ int submitLoginRequest(Client &client);
 int processIncomingMessage(Client &client);
 bool verifyTooLong(string &message);
 bool verifyDisconnectResquest(string &message);
-void printMessage(Client &client);
+void printMessage(string &message);
 int closeProgramRoutine(Client &client);
 
 int main() {
 
 	// Set up winsock - This part is exactly the same for client and server */
-
 	WSADATA wsaData;	//Structure that contains information about the Windows Sockets implementation
-
+	struct addrinfo *result = NULL, //  addrinfo : Object that contains a sockaddr structure
+		*ptr = NULL,
+		hints;
+	string messageToServer = "";
+	Client client = { INVALID_SOCKET, "", "", "", "", "" };
 	int iResult;
-
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData); //MAKEWORD(2,2) Request for version 2.2 of Winsock on the system
+	
 	if (iResult != 0) {
 		printf("WSAStartup failed: %d\n", iResult);
 		printf("Press any key to end the program\n");
@@ -76,30 +87,33 @@ int main() {
 		return 1;
 	}
 
-	//  addrinfo : Object that contains a sockaddr structure
-	struct addrinfo *result = NULL,
-		*ptr = NULL,
-		hints;
-
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-
-	Client client = { INVALID_SOCKET, "", "", "", "", ""};
 
 	requestPortAndIP(client);
 	requestLoginInfo(client);
 
 	string ip = client.ipAddress;
 
+	
 	// Resolve the server address and port
-	iResult = getaddrinfo((PCSTR)&client.ipAddress, (PCSTR)&client.port, &hints, &result);	//TODO if connection issues, perhaps casts don't work
+	iResult = getaddrinfo(client.ipAddress.c_str(), client.port.c_str(), &hints, &result);	//TODO if connection issues, perhaps casts don't work
 	if (iResult != 0) {
 		printf("getaddrinfo() failed: %d\n", iResult);
 		return (closeProgramRoutine(client));
 	}
-
+	
+	/*
+	iResult = getaddrinfo(static_cast<LPCTSTR>(IP_ADDRESS), DEFAULT_PORT, &hints, &result);
+	if (iResult != 0) {
+		cout << "getaddrinfo() failed with error: " << iResult << endl;
+		WSACleanup();
+		system("pause");
+		return 1;
+	}
+	*/
 	//Find first valid address
 	while ((result != NULL) && (result->ai_family != AF_INET))
 		result = result->ai_next;
@@ -134,20 +148,24 @@ int main() {
 
 	cout << "Successful connection so server" << endl;
 
-	if (!submitLoginRequest(client)) {
+	if (!submitLoginRequest(client)) {	//Vérifier que 
 		printf("Login failed\n");
 		return (closeProgramRoutine(client));
 	}
 
-	freeaddrinfo(result);	//??
+	freeaddrinfo(result);	//??**************should be fine*****
 	//thread listening to server
-	thread my_thread(processIncomingMessage, client);
-	string messageToServer = "";
+	threadRunning = true;
+	thread listeningThread(processIncomingMessage, client);
 
+	cin.ignore();
 	while (1)
 	{
 		getline(cin, messageToServer);
-		if (!verifyTooLong(messageToServer)) {
+		if (verifyDisconnectResquest(messageToServer))
+			break;
+		else if (!verifyTooLong(messageToServer)) {
+			messageToServer.insert(0, MSG_TYPE_MSG);
 			iResult = send(client.socket, messageToServer.c_str(), strlen(messageToServer.c_str()), 0);
 
 			if (iResult <= 0)
@@ -156,13 +174,14 @@ int main() {
 				break;
 			}
 		}
-		else if (verifyDisconnectResquest(messageToServer))
-			break;
 	}
 
 	//Shutdown the connection since no more data will be sent
-	my_thread.detach();
-
+	threadRunning = false;
+	closesocket(client.socket);
+	listeningThread.join();
+	WSACleanup();
+	system("pause");
 	return 0;
 }
 
@@ -242,11 +261,15 @@ int submitLoginRequest(Client &client) {
 	
 	int iResult;
 	string loginInfo = MSG_TYPE_LOG + client.username + DATA_SEPARATOR + client.password;
+	cout << "SENT BEFORE" << loginInfo << endl;
+	cout << "RECEIVED BEFORE" << client.receivedMessage << endl;
 	//Send login info
 	iResult = send(client.socket, loginInfo.c_str(), strlen(loginInfo.c_str()), 0);
 	//Analyse login response
 	recv(client.socket, client.receivedMessage, MAX_MSG_BUF_LENGTH, 0);
 	string messageFromServer = client.receivedMessage;
+
+	cout << "RECEIVED AFTER" << client.receivedMessage << endl;
 
 	if (messageFromServer == MSG_TYPE_LOGIN_FAILED)
 		requestLoginInfo(client);
@@ -255,19 +278,13 @@ int submitLoginRequest(Client &client) {
 	return 0;
 }
 
-void printMessage(Client& client) {
-	string receivedMessage = client.receivedMessage;
-	if (receivedMessage.substr(0, MSG_TYPE_MSG.length()) == MSG_TYPE_MSG) {
-		receivedMessage.erase(0, MSG_TYPE_MSG.length());
-		cout << "MESSAGE DATA : " << receivedMessage << endl;
-	}
-	else
-		cout << "ERROR : Unknown message header from server" << endl;
+void printMessage(string &message) {
+	cout << message;
 };
 
 bool verifyTooLong(string &message) {
 	if (message.length() > MESSAGE_MAX_LENGTH) {
-		cout << "CHATROOM WARNING: Your message had " << message.length() << "and thus was not sent" <<endl;
+		cout << "CHATROOM WARNING: Your message had " << message.length() << " and thus was not sent" <<endl;
 		cout << "CHATROOM REMINDER: Max message length is " << MESSAGE_MAX_LENGTH << " and blank messages will disconnect from chat." << endl;
 		return true;
 	}
@@ -276,7 +293,7 @@ bool verifyTooLong(string &message) {
 
 bool verifyDisconnectResquest(string &message) {
 	if (message.length() == 0) {
-		cout << "CHATROOM REMINDER: You have entered a blank message. Press any key to close program." << endl;
+		cout << "NOW DISCONNECTING FROM CHATROOM" << endl;
 		return true;
 	}
 	return false;
@@ -284,18 +301,24 @@ bool verifyDisconnectResquest(string &message) {
 
 int processIncomingMessage(Client& client)
 {
-	while (1)
+	string messageToPrint;
+	while (threadRunning)
 	{
+		memset(client.receivedMessage, 0, MAX_MSG_BUF_LENGTH);
+
 		if (client.socket != 0)
 		{
-			int iResult = recv(client.socket, client.receivedMessage, MAX_MSG_BUF_LENGTH, 0);
-
+			int iResult = recv(client.socket, client.receivedMessage, 300, 0);
+			messageToPrint = client.receivedMessage;
+			messageToPrint = messageToPrint.substr(0, iResult);
 			if (iResult != SOCKET_ERROR)
-				printMessage(client);
+				printMessage(messageToPrint);
 			else
 			{
-				cout << "recv() failed: " << WSAGetLastError() << endl;
-				break;
+				if (WSAGetLastError() != WSAECONNABORTED && WSAGetLastError() != WSAECONNRESET){
+					cout << "recv() failed: " << WSAGetLastError() << endl;
+					break;
+				}
 			}
 		}
 	}
