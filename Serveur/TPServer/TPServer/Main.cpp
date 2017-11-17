@@ -44,7 +44,7 @@ std::list<std::string> savedMessages;
 struct ChildThreadParams
 {
 	SOCKET sd_;
-	std::vector<SOCKET> openedSockets_;
+	std::vector<SOCKET>* openedSockets_;
 	sockaddr_in sinRemote_;
 };
 
@@ -185,7 +185,7 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 
 			ChildThreadParams ctp;
 			ctp.sd_ = sd;
-			ctp.openedSockets_ = openSockets;
+			ctp.openedSockets_ = &openSockets;
 			ctp.sinRemote_ = sinRemote;
 
 			DWORD nThreadID;
@@ -337,6 +337,7 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	SOCKET sd = ctp->sd_;
 
 	bool disconnectRequested = false;
+	bool errorOccured = false;
 
 	char readBuffer[MAX_MSG_LENGTH + MAX_HEADER_LENGTH];
 	std::string username = "";
@@ -377,12 +378,12 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				if(loginStatus == USER_STATUS_OK)
 				{
 					username = tempUN;
-					send(sd, (char*)LOGIN_STATUS_OK, sizeof((char*)LOGIN_STATUS_OK), 0);
+					send(sd, (char*)LOGIN_STATUS_OK, 4*sizeof((char*)LOGIN_STATUS_OK), 0);
 					SendMessageHistory(sd);
 				}
 				else if(loginStatus == USER_STATUS_WRONG_PW)
 				{
-					send(sd, (char*)LOGIN_STATUS_FAIL, sizeof((char*)LOGIN_STATUS_FAIL), 0);
+					send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
 				}
 				else if(loginStatus == USER_STATUS_NOT_EXIST)
 				{
@@ -390,12 +391,12 @@ DWORD WINAPI EchoHandler(void* ctp_)
 					if (userCreated)
 					{
 						username = tempUN;
-						send(sd, (char*)LOGIN_STATUS_OK, sizeof((char*)LOGIN_STATUS_OK), 0);
+						send(sd, (char*)LOGIN_STATUS_OK, 4*sizeof((char*)LOGIN_STATUS_OK), 0);
 						SendMessageHistory(sd);
 					}
 					else
 					{
-						send(sd, (char*)LOGIN_STATUS_FAIL, sizeof((char*)LOGIN_STATUS_FAIL), 0);
+						send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
 					}
 				}
 			}
@@ -405,16 +406,16 @@ DWORD WINAPI EchoHandler(void* ctp_)
 
 				WaitForSingleObject(mgMutex, INFINITE);
 
-				savedMessages.pop_front();
+				if(savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 				savedMessages.push_back(formattedMsg);
 
 				WaitForSingleObject(soMutex, INFINITE);
 
-				auto it = ctp->openedSockets_.begin();
-				auto end = ctp->openedSockets_.end();
+				auto it = ctp->openedSockets_->begin();
+				auto end = ctp->openedSockets_->end();
 				for(it; it != end; ++it)
 				{
-					send(*it, formattedMsg.c_str(), sizeof formattedMsg.c_str(), 0);
+					send(*it, formattedMsg.c_str(), 4*sizeof formattedMsg.c_str(), 0);
 				}
 
 				ReleaseMutex(soMutex);
@@ -429,9 +430,10 @@ DWORD WINAPI EchoHandler(void* ctp_)
 		else
 		{
 			printf("%S\n", WSAGetLastErrorMessage());
+			errorOccured = true;
 		}
 	}
-	while (!disconnectRequested);
+	while (!disconnectRequested && !errorOccured);
 
 
 	closesocket(sd);
@@ -439,11 +441,11 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	WaitForSingleObject(soMutex, INFINITE);
 
 	// Remove closed socket from socket vector
-	auto it = std::find(ctp->openedSockets_.begin(), ctp->openedSockets_.end(), sd);
-	if(it != ctp->openedSockets_.end())
+	auto it = std::find(ctp->openedSockets_->begin(), ctp->openedSockets_->end(), sd);
+	if(it != ctp->openedSockets_->end())
 	{
-		std::swap(*it, ctp->openedSockets_.back()); // Swap item with last one
-		ctp->openedSockets_.pop_back(); // Remove last item from vector
+		std::swap(*it, ctp->openedSockets_->back()); // Swap item with last one
+		ctp->openedSockets_->pop_back(); // Remove last item from vector
 
 		// Using swap + pop_back avoids the reshuffling that erase does
 	}
@@ -470,6 +472,7 @@ static std::string FormatMessageBeforeSend(const std::string& un, const std::str
 	timeSS << std::to_string(timeInfo.tm_sec);
 
 	std::stringstream ss;
+	ss << MSG_TYPE_MSG;
 	ss << "[" + un + " - " + ip + " - " + timeSS.str() + "]: ";
 	ss << msg;
 
@@ -484,7 +487,7 @@ static void SendMessageHistory(SOCKET sd)
 	for (it; it != end; ++it)
 	{
 		std::string msg = *it;
-		send(sd, msg.c_str(), sizeof msg.c_str(), 0);
+		send(sd, msg.c_str(), 4*sizeof msg.c_str(), 0);
 	}
 	ReleaseMutex(mgMutex);
 }
@@ -501,7 +504,7 @@ static int LoginUser(const std::string& un, const std::string& pw)
 	if (!in)
 	{
 		//Error occured!
-		printf("Cannot open %s", USERS_FILE);
+		printf("Cannot open %s\n", USERS_FILE);
 	}
 	else
 	{
