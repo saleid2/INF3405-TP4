@@ -26,6 +26,7 @@
 #define MSG_TYPE_MSG "$msg:"
 #define MSG_TYPE_LOGIN "$log:"
 #define MSG_TYPE_LOGOUT "$quit:"
+#define MSG_TYPE_LISTEN "$ok::"
 #define LOGIN_STATUS_OK "$login_ok:"
 #define LOGIN_STATUS_FAIL "$login_failed:"
 #define LOG_MSG_FILE "log.txt"
@@ -379,7 +380,6 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				{
 					username = tempUN;
 					send(sd, (char*)LOGIN_STATUS_OK, 4*sizeof((char*)LOGIN_STATUS_OK), 0);
-					SendMessageHistory(sd);
 				}
 				else if(loginStatus == USER_STATUS_WRONG_PW)
 				{
@@ -392,13 +392,16 @@ DWORD WINAPI EchoHandler(void* ctp_)
 					{
 						username = tempUN;
 						send(sd, (char*)LOGIN_STATUS_OK, 4*sizeof((char*)LOGIN_STATUS_OK), 0);
-						SendMessageHistory(sd);
 					}
 					else
 					{
 						send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
 					}
 				}
+			}
+			else if (msgType == MSG_TYPE_LISTEN)
+			{
+				SendMessageHistory(sd);
 			}
 			else if (msgType == MSG_TYPE_MSG)
 			{
@@ -409,7 +412,7 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				if(savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 				savedMessages.push_back(formattedMsg);
 
-				printf("Received message: %s", formattedMsg);
+				printf("Received message: %S", formattedMsg);
 
 				WaitForSingleObject(soMutex, INFINITE);
 
@@ -506,7 +509,7 @@ static int LoginUser(const std::string& un, const std::string& pw)
 	if (!in)
 	{
 		//Error occured!
-		printf("Cannot open %s\n", USERS_FILE);
+		printf("Cannot open %S\n", USERS_FILE);
 	}
 	else
 	{
@@ -552,7 +555,7 @@ static bool CreateUser(const std::string& un, const std::string& pw)
 	if (!out)
 	{
 		//Error occured!
-		printf("Cannot open %s\n", USERS_FILE);
+		printf("Cannot open %S\n", USERS_FILE);
 	}
 	else
 	{
