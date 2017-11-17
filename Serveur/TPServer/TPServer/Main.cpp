@@ -26,7 +26,7 @@
 #define MSG_TYPE_MSG "$msg:"
 #define MSG_TYPE_LOGIN "$log:"
 #define MSG_TYPE_LOGOUT "$quit:"
-#define MSG_TYPE_LISTEN "$ok::"
+#define MSG_TYPE_LISTEN "$ok:"
 #define LOGIN_STATUS_OK "$login_ok:"
 #define LOGIN_STATUS_FAIL "$login_failed:"
 #define LOG_MSG_FILE "log.txt"
@@ -412,7 +412,8 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				if(savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 				savedMessages.push_back(formattedMsg);
 
-				printf("Received message: %S", formattedMsg);
+				std::string output = "Received message: " + formattedMsg + "\n";
+				printf(output.c_str());
 
 				WaitForSingleObject(soMutex, INFINITE);
 
