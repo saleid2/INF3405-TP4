@@ -396,7 +396,10 @@ DWORD WINAPI EchoHandler(void* ctp_)
 					}
 					else
 					{
-						send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
+						username = tempUN;
+						send(sd, (char*)LOGIN_STATUS_OK, 4 * sizeof((char*)LOGIN_STATUS_OK), 0);
+						SendMessageHistory(sd);
+						//send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
 					}
 				}
 			}
@@ -415,7 +418,8 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				auto end = ctp->openedSockets_->end();
 				for(it; it != end; ++it)
 				{
-					send(*it, formattedMsg.c_str(), 4*sizeof formattedMsg.c_str(), 0);
+					formattedMsg += "\n";
+					send(*it, formattedMsg.c_str(), formattedMsg.length(), 0);
 				}
 
 				ReleaseMutex(soMutex);
@@ -486,8 +490,8 @@ static void SendMessageHistory(SOCKET sd)
 	auto end = savedMessages.end();
 	for (it; it != end; ++it)
 	{
-		std::string msg = *it;
-		send(sd, msg.c_str(), 4*sizeof msg.c_str(), 0);
+		std::string msg = *it + "\n";
+		send(sd, msg.c_str(), msg.length(), 0);
 	}
 	ReleaseMutex(mgMutex);
 }
@@ -550,7 +554,7 @@ static bool CreateUser(const std::string& un, const std::string& pw)
 	if (!out)
 	{
 		//Error occured!
-		printf("Cannot open %s", USERS_FILE);
+		printf("Cannot open %s\n", USERS_FILE);
 	}
 	else
 	{
