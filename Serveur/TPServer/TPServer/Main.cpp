@@ -396,10 +396,7 @@ DWORD WINAPI EchoHandler(void* ctp_)
 					}
 					else
 					{
-						username = tempUN;
-						send(sd, (char*)LOGIN_STATUS_OK, 4 * sizeof((char*)LOGIN_STATUS_OK), 0);
-						SendMessageHistory(sd);
-						//send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
+						send(sd, (char*)LOGIN_STATUS_FAIL, 4*sizeof((char*)LOGIN_STATUS_FAIL), 0);
 					}
 				}
 			}
@@ -411,6 +408,8 @@ DWORD WINAPI EchoHandler(void* ctp_)
 
 				if(savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 				savedMessages.push_back(formattedMsg);
+
+				printf("Received message: %s", formattedMsg);
 
 				WaitForSingleObject(soMutex, INFINITE);
 
@@ -433,7 +432,7 @@ DWORD WINAPI EchoHandler(void* ctp_)
 		}
 		else
 		{
-			printf("%S\n", WSAGetLastErrorMessage());
+			if(WSAGetLastError() != WSAECONNRESET) printf("%S\n", WSAGetLastErrorMessage());
 			errorOccured = true;
 		}
 	}
@@ -476,7 +475,6 @@ static std::string FormatMessageBeforeSend(const std::string& un, const std::str
 	timeSS << std::to_string(timeInfo.tm_sec);
 
 	std::stringstream ss;
-	ss << MSG_TYPE_MSG;
 	ss << "[" + un + " - " + ip + " - " + timeSS.str() + "]: ";
 	ss << msg;
 
