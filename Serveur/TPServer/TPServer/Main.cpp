@@ -8,6 +8,7 @@
 #include <fstream>
 #include <list>
 #include <ws2tcpip.h>
+#include <iostream>
 
 #pragma comment(lib, "Ws2_32.lib") //Link with the Ws2_32.lib library file
 
@@ -31,14 +32,20 @@
 #define LOGIN_STATUS_FAIL "$login_failed:"
 #define LOG_MSG_FILE "log.txt"
 
-// Mutex pour section critiques de modifications du vecteur contenant tous les sockets ouverts
+// Mutex for modifying vector of sockets
 HANDLE soMutex;
 
-// Mutex pour la lecture et ecriture du fichier de username et pw
+// Mutex for read/write to file for username/pw
 HANDLE unMutex;
 
-// Mutex pour la lecture et ecriture de messages
+// Mutex for read/write of messages
 HANDLE mgMutex;
+
+// Mutex for message counter
+HANDLE mcMutex;
+
+// Counter that keeps track of new messages so that we can trigger write-to-disk every 15 messages
+int mgCounter = 0;
 
 std::list<std::string> savedMessages;
 
@@ -66,11 +73,10 @@ wchar_t* WSAGetLastErrorMessage()
 	               nullptr, WSAGetLastError(),
 	               MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 	               (LPWSTR)&s, 0, nullptr);
-
 	return s;
 }
 
-//Checkcs if IP address is valid
+//Checks if IP address is valid
 bool IsValidIP(char* ipAddress)
 {
 	std::regex ipRegEx = std::regex(
@@ -251,7 +257,7 @@ int main()
 
 	WSACleanup();
 	printf("Server closed successfully");
-	
+
 	system("pause");
 
 	return 0;
@@ -352,8 +358,12 @@ DWORD WINAPI EchoHandler(void* ctp_)
 	InetNtop(AF_INET, &(ctp->sinRemote_.sin_addr), ipAddr, INET_ADDRSTRLEN);
 	userPort = ntohs(ctp->sinRemote_.sin_port);
 
-	userIP = ipAddr;
-	userIP += ":" + userPort;
+
+	std::stringstream ss;
+	ss << ipAddr;
+	ss << ":";
+	ss << userPort;
+	userIP = ss.str();
 
 	//Read Data from client
 	do
