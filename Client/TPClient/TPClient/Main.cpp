@@ -9,13 +9,6 @@
 #include <conio.h>		//_gretch() : press any key to continue
 #include <thread>		
 
-/*
-TO DO : PICK AND IMPLEMENT LOG OUT PROCEDURE (empty message as suggested in email?)
-TO DO : MANAGE 200 CHAR MAX
-TO DO : SEPARATE NAME AND TEXT FROM INCOMING MESSAGES
-TO DO : WHAT HAPPENS TO SENT MESSAGES (APPEAR DOUBLE... MAY HAVE TO MASK CLIENT'S OWN FROM BROADCASTS)
-*/
-
 using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib") //Link with the Ws2_32.lib library file
@@ -23,15 +16,10 @@ using namespace std;
 /* Global const */
 #define MIN_PORT 5000
 #define MAX_PORT 5050
-#define MESSAGE_MAX_LENGTH 200	//INUTILE
-#define MAX_MSG_BUF_LENGTH 300	//TO DO : Validate with Salim and calculate real max
-#define MAX_USERNAME_LENGTH 100	//TO DO : Validate with Salim
-#define MAX_PASSWORD_LENGTH 100	//TO DO : Validate with Salim
-#define MAX_STORED_MESSAGES 15	//TO DO : Validate with Salim
-
-//TEST**********
-#define IP_ADDRESS "128.0.0.1"
-#define DEFAULT_PORT "5000"
+#define MESSAGE_MAX_LENGTH 200
+#define MAX_MSG_BUF_LENGTH 400
+#define MAX_USERNAME_LENGTH 30
+#define MAX_PASSWORD_LENGTH 30
 
 struct Client
 {
@@ -61,7 +49,7 @@ void requestLoginInfo(Client &client);
 bool validateUsername(string &username);
 bool validatePassword(string &password);
 bool validateIP(string &ip);
-bool validatePort(string &port);
+bool validatePort(string port);
 int submitLoginRequest(Client &client);
 int processIncomingMessage(Client &client);
 bool verifyTooLong(string &message);
@@ -80,7 +68,7 @@ int main() {
 	Client client = { INVALID_SOCKET, "", "", "", "", "" };
 	int iResult;
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData); //MAKEWORD(2,2) Request for version 2.2 of Winsock on the system
-	
+
 	if (iResult != 0) {
 		printf("WSAStartup failed: %d\n", iResult);
 		printf("Press any key to end the program\n");
@@ -97,27 +85,18 @@ int main() {
 
 	string ip = client.ipAddress;
 
-	
+
 	// Resolve the server address and port
 	iResult = getaddrinfo(client.ipAddress.c_str(), client.port.c_str(), &hints, &result);	//TODO if connection issues, perhaps casts don't work
 	if (iResult != 0) {
 		printf("getaddrinfo() failed: %d\n", iResult);
 		return (closeProgramRoutine(client));
 	}
-	
-	/*
-	iResult = getaddrinfo(static_cast<LPCTSTR>(IP_ADDRESS), DEFAULT_PORT, &hints, &result);
-	if (iResult != 0) {
-		cout << "getaddrinfo() failed with error: " << iResult << endl;
-		WSACleanup();
-		system("pause");
-		return 1;
-	}
-	*/
+
 	//Find first valid address
 	while ((result != NULL) && (result->ai_family != AF_INET))
 		result = result->ai_next;
-	
+
 	//If address not found
 	if (((result->ai_family != AF_INET || (result == NULL)))) {
 		printf("Cannot find address \n");
@@ -146,13 +125,17 @@ int main() {
 		return (closeProgramRoutine(client));
 	}
 
-	cout << "Successful connection so server" << endl;
-
 	do {
 		requestLoginInfo(client);
 	} while (!submitLoginRequest(client));
 
-	freeaddrinfo(result);	//??**************should be fine*****
+	cout << endl << "Successful connection so server." << endl;
+	cout << "To disconnect from chatroom, send a blank message." << endl << endl;
+	cout << "----------CHATROOM----------" << endl;
+
+
+	freeaddrinfo(result);
+
 	//thread listening to server
 	threadRunning = true;
 	thread listeningThread(processIncomingMessage, client);
@@ -191,7 +174,7 @@ void requestPortAndIP(Client& client) {
 		cout << "Please enter the server IP address: ";
 		cin >> client.ipAddress;
 	} while (!validateIP(client.ipAddress));
-	
+
 	do {
 		cout << "Please pick a port number between " << MIN_PORT << " and " << MAX_PORT << ": ";
 		cin >> client.port;
@@ -214,7 +197,7 @@ void requestLoginInfo(Client &client) {
 
 bool validateUsername(string &username) {
 	int length = username.length();
-	if (length > MAX_USERNAME_LENGTH){
+	if (length > MAX_USERNAME_LENGTH) {
 		cout << "Username must be below " << MAX_USERNAME_LENGTH << " characters." << endl;
 		return false;
 	}
@@ -242,21 +225,21 @@ bool validateIP(string& ip) {
 	return (isValidIp);
 }
 
-bool validatePort(string& port) {
+bool validatePort(string port) {
 
-	regex ipRegex("^50([0-4][0-9]|50)$");
+	int tempPort = stoi(port);
 
-	bool isValidPort = regex_search(port, ipRegex);
+	bool isValidPort = (tempPort >= MIN_PORT || tempPort <= MAX_PORT);
 
 	if (!isValidPort) {
-		cout << "The port number is not valid. Please enter a valid port number between " << MIN_PORT << " and " << MAX_PORT << "."<< endl;
+		cout << "The port number is not valid. Please enter a valid port number between " << MIN_PORT << " and " << MAX_PORT << "." << endl;
 	}
 
 	return (isValidPort);
 }
 
 int submitLoginRequest(Client &client) {
-	
+
 	int iResult;
 	string loginInfo = MSG_TYPE_LOG + client.username + DATA_SEPARATOR + client.password;
 	//Send login info
@@ -279,8 +262,8 @@ void printMessage(string &message) {
 
 bool verifyTooLong(string &message) {
 	if (message.length() > MESSAGE_MAX_LENGTH) {
-		cout << "CHATROOM WARNING: Your message had " << message.length() << " and thus was not sent" <<endl;
-		cout << "CHATROOM REMINDER: Max message length is " << MESSAGE_MAX_LENGTH << " and blank messages will disconnect from chat." << endl;
+		cout << "CHATROOM REMINDER: Max message length is " << MESSAGE_MAX_LENGTH << "." << endl;
+		cout << "CHATROOM WARNING: Your message had " << message.length() << " characters and thus was not sent." << endl;
 		return true;
 	}
 	return false;
@@ -288,7 +271,7 @@ bool verifyTooLong(string &message) {
 
 bool verifyDisconnectResquest(string &message) {
 	if (message.length() == 0) {
-		cout << "NOW DISCONNECTING FROM CHATROOM" << endl;
+		cout << "Blank message was submitted : Now disconnecting from chatroom." << endl;
 		return true;
 	}
 	return false;
@@ -311,7 +294,7 @@ int processIncomingMessage(Client& client)
 				printMessage(messageToPrint);
 			else
 			{
-				if (WSAGetLastError() != WSAECONNABORTED && WSAGetLastError() != WSAECONNRESET){
+				if (WSAGetLastError() != WSAECONNABORTED && WSAGetLastError() != WSAECONNRESET) {
 					cout << "recv() failed: " << WSAGetLastError() << endl;
 					break;
 				}
