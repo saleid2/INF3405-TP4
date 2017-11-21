@@ -56,7 +56,6 @@ struct ChildThreadParams
 	sockaddr_in sinRemote_;
 };
 
-DWORD WINAPI SaveHistoryLoop(void* v);
 extern DWORD WINAPI EchoHandler(void* ctp);
 static bool SaveHistory();
 static void LoadHistory();
@@ -169,10 +168,7 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 	std::vector<SOCKET> openSockets;
 	std::vector<HANDLE> openThreads;
 
-	DWORD saveThreadID;
-	HANDLE saveThread = CreateThread(nullptr, 0, SaveHistoryLoop, NULL, 0, &saveThreadID);
 
-	// TODO: Test connection and thread creation
 	while (true)
 	{
 		sockaddr_in sinRemote;
@@ -207,7 +203,6 @@ int openSocket(char* ipAddress, char* port, SOCKET sock)
 
 	closesocket(sock);
 
-	TerminateThread(saveThread, 0);
 	SaveHistory();
 
 	for(auto thread: openThreads)
@@ -228,6 +223,7 @@ int main()
 	soMutex = CreateMutex(NULL, FALSE, NULL);
 	unMutex = CreateMutex(NULL, FALSE, NULL);
 	mgMutex = CreateMutex(NULL, FALSE, NULL);
+	mcMutex = CreateMutex(NULL, FALSE, NULL);
 
 	/* Set up winsock - This part is exactly the same for client and server */
 
@@ -263,39 +259,15 @@ int main()
 	return 0;
 }
 
-DWORD WINAPI SaveHistoryLoop(void* v)
-{
-	while(1)
-	{
-		bool saved = false;
-		Sleep(1000); // Persist messages to disk every minute
-		saved = SaveHistory();
-		if(!saved)
-		{
-			// Try again
-			saved = SaveHistory();
-			if(!saved)
-			{
-				printf("Couldn't persist chat log to disk\n");
-			}
-			else
-			{
-				printf("Chat log saved to disk\n");
-			}
-		}
-	}
-
-	return 0;
-}
-
 static bool SaveHistory()
 {
 	bool success = true;
 
 	WaitForSingleObject(mgMutex, INFINITE);
+	WaitForSingleObject(mcMutex, INFINITE);
 
 	std::ofstream out;
-	out.open(LOG_MSG_FILE); // Open in overwrite mode
+	out.open(LOG_MSG_FILE, std::ios::app); // Open and append at the end of file
 
 	if(out)
 	{
@@ -308,12 +280,14 @@ static bool SaveHistory()
 		}
 
 		out.close();
+		mgCounter = 0;
 	}
 	else
 	{
 		success = false;
 	}
 
+	ReleaseMutex(mcMutex);
 	ReleaseMutex(mgMutex);
 	return success;
 }
@@ -330,6 +304,7 @@ static void LoadHistory()
 		std::string msg;
 		while(std::getline(in, msg))
 		{
+			if (savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 			savedMessages.push_back(msg);
 		}
 		in.close();
@@ -418,9 +393,23 @@ DWORD WINAPI EchoHandler(void* ctp_)
 				std::string formattedMsg = FormatMessageBeforeSend(username, userIP, msgData);
 
 				WaitForSingleObject(mgMutex, INFINITE);
+				WaitForSingleObject(mcMutex, INFINITE);
+
+				// If 15 messages have been received since last save
+				if(mgCounter == MAX_STORED_MSG)
+				{
+					//Release mutex before calling SaveHistory so that function can lock it
+					ReleaseMutex(mcMutex);
+					SaveHistory();
+				}
+				else
+				{
+					ReleaseMutex(mcMutex);
+				}
 
 				if(savedMessages.size() >= MAX_STORED_MSG) savedMessages.pop_front();
 				savedMessages.push_back(formattedMsg);
+				mgCounter++;
 
 				std::string output = "Received message: " + formattedMsg + "\n";
 				printf(output.c_str());
