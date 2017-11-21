@@ -159,8 +159,8 @@ int main() {
 
 	//Shutdown the connection since no more data will be sent
 	threadRunning = false;
-	closesocket(client.socket);
 	listeningThread.join();
+	closesocket(client.socket);
 	WSACleanup();
 	system("pause");
 	return 0;
